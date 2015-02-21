@@ -1,0 +1,149 @@
+---
+title: "Qualitative Human Activity Recognition"
+author: "Aravind Sesetty"
+date: "Friday, February 20, 2015"
+output: html_document
+---
+- - -
+## Abstract
+People regularly quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, we will examin data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. Participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in 5 different ways:
+
+- **Class A**: Exactly according to the specification
+- **Class B**: Throwing the elbows to the front
+- **Class C**: Lifting the dumbbell only halfway
+- **Class D**: Lowering the dumbbell only halfway
+- **Class E**: Throwing the hips to the front
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes B, C, D, E correspond to common mistakes.
+
+Our results underline the potential of model-based prediction and also predict the manner in which they did the exercise.
+
+## Data 
+The data for this project come from [Groupware@LES - Human Activity Recognition Project]("http://groupware.les.inf.puc-rio.br/har")
+
+- [Training Data]("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+- [Test Data]("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+
+```{r globalOptions, echo=FALSE, results='hide', fig.path='figures/', warning=FALSE, message=FALSE}
+library(knitr)
+library(ggplot2)
+library(caret)
+library(randomForest)
+
+opts_chunk$set(echo=TRUE, results='markup', cache=TRUE, fig.width=7, fig.height=5, warning=FALSE, message=FALSE)
+```
+
+Download both Training & Test Data and read the `*.csv` files into R
+```{r dataSet}
+setwd("C:/RDev/workdir/PML")
+download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "pml-training.csv", mode = "wb")
+download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "pml-testing.csv", mode = "wb")
+
+trainingSet <- read.csv("pml-training.csv", header=TRUE, na.strings=c("","NA","#DIV/0!"))
+testingSet <- read.csv("pml-testing.csv", header=TRUE, na.strings=c("","NA","#DIV/0!"))
+
+dim(trainingSet)
+dim(testingSet)
+```
+
+## Pre-Processing
+**1. Maunal Selection and Removal of columns**      
+
+- X: Not part of observations
+- user_name: Prediction is not going to be per subject
+- raw_timestamp_part_1: Prediction is not going to be based on time
+- raw_timestamp_part_2: Prediction is not going to be based on time
+- cvtd_timestamp: Prediction is not going to be based on time
+- new_window: Prediction has no impact of window
+- num_window: Prediction has no impact of window
+```{r PP_MaunalSelection}
+trainingSet <- trainingSet[,-c(1:7)]
+testingSet <- testingSet[,-c(1:7)]
+```
+
+**2. Near Zero-Variance Predictors**   
+
+- Search for predictors that take an unique value across samples and remove them. 
+- This kind of predictors are not only non-informative but can also break some models.
+```{r PP_NZV}
+nzv <- nearZeroVar(trainingSet)
+trainingSet <- trainingSet[, -nzv]
+
+#nzv <- nearZeroVar(testingSet)
+#testingSet <- testingSet[, -nzv]
+```
+
+**3. Removing columns based on no. of NAs**   
+
+- Remove columns in which the NA values are more than 90% threshold value.
+```{r PP_NAs}
+naPerColumn <- apply(trainingSet, 2, function(trainingSetCol) {sum(is.na(trainingSetCol))})
+trainingSet <- trainingSet[, -which(naPerColumn > nrow(trainingSet)*0.9 )]
+
+naPerColumn <- apply(testingSet, 2, function(testingSetCol) {sum(is.na(testingSetCol))})
+testingSet <- testingSet[, -which(naPerColumn > nrow(testingSet)*0.9 )]
+
+dim(trainingSet)
+dim(testingSet)
+```
+
+## Data Splitting
+Split the Training Set into two subsets (60% : 40%), one for training the model and the other for cross-validation.
+```{r dataSplitting}
+trainingSetIndex <- createDataPartition(y=trainingSet$classe, p=0.60, list=FALSE)
+
+trainingSubSet <- trainingSet[trainingSetIndex,]
+testingSubSet <- trainingSet[-trainingSetIndex,]
+```
+
+## Plotting Predictors
+Show the densities of all Classes A, B, C, D, E through Density Plot.
+```{r plottingPredictors}
+classePlot <- qplot(classe, colour=classe, data=trainingSubSet, geom="density")
+print(classePlot)
+```
+
+## Fit a Model
+#### 1. CART Model   
+- Use **CART Model** to train the model on training subset
+- Use the trained **CART Model** to predict on test subset
+- Generate the **confusionMatrix** for "Overall Statistics"" and "Statistics by Class""
+```{r CART}
+modelFitCART <- train(classe ~ ., method="rpart", data=trainingSubSet)
+predictions <- predict(modelFitCART, newdata=testingSubSet)
+confusionMatrix(predictions, testingSubSet$classe)
+```
+- The CART Model gives an accuracy of 49% with an In-Sample Error rate of 50%.
+- This prediction model has very high FalsePositive count.
+- We cannot consider this model as the accuracy is less & error rate is high.
+
+#### 2. Random Forest Model   
+- Use **Random Forest Model** to train the model on training subset
+- Use the trained **Random Forest Model** to predict on test subset
+- Generate the **confusionMatrix** for "Overall Statistics"" and "Statistics by Class""
+```{r randomForest}
+modelFitRF <- randomForest(classe ~ ., data=trainingSubSet, importance=FALSE)
+predictions <- predict(modelFitRF, newdata=testingSubSet)
+confusionMatrix(predictions, testingSubSet$classe)
+```
+- The Random Forest Model gives an accuracy of 99% with an In-Sample Error rate of 1%.
+- This prediction model has very less FalsePositives & FalseNegatives count.
+- We recommend this model as the accuracy is very high & error rate is very low.
+
+## Evaluation
+Predict the Test Data by applying the selected RandomForest model
+```{r}
+predictions <- predict(modelFitRF, newdata=testingSet)
+print(predictions)
+
+testingSet$classe <- cbind(as.character(predictions))
+testingSet$classe <- as.factor(testingSet$classe)
+confusionMatrix(predictions, testingSet$classe)
+```
+- Random Forest Model predicted the Class with an accuracy of 100% with an Out-of-Sample Error rate of 0%.
+- Random Forest Model prediction has very 0 FalsePositives & 0 FalseNegatives count.
+- We recommend this model as the accuracy is very high & error rate is very low.
+
+## Out of Sample Errors
+- In-Sample Error (1%) is greater than Out of Sample Error (0%).
+- This imples that Training Set was NOT overfitted.
